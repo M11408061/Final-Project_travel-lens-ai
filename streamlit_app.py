@@ -256,12 +256,25 @@ def extract_postcard_sentence(text):
 
 
 def get_font(size, bold=False):
-    candidates = [
+    regular_candidates = [
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
         "/System/Library/Fonts/PingFang.ttc",
         "/System/Library/Fonts/STHeiti Light.ttc",
         "/Library/Fonts/Arial Unicode.ttf",
         "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
     ]
+    bold_candidates = [
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Medium.ttc",
+        "/Library/Fonts/Arial Unicode.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    ]
+    candidates = bold_candidates if bold else regular_candidates
     for path in candidates:
         if os.path.exists(path):
             try:
