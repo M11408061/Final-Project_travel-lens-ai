@@ -34,6 +34,22 @@ FILTERS = {
     "城市高對比": "提升清晰度、飽和度與對比，適合夜景與城市感照片。",
 }
 
+MOODS = {
+    "放鬆": "語氣輕柔、慢步調，像把時間放慢的旅行片刻。",
+    "冒險": "語氣有探索感，強調未知、移動與新鮮感。",
+    "浪漫": "語氣溫柔、有光影與情感，但不要太誇張。",
+    "懷舊": "語氣帶有回憶感，像翻到一張很久以後還會想念的照片。",
+    "熱鬧": "語氣明亮、有活力，像和朋友一起分享旅途。",
+    "療癒": "語氣安靜、舒緩，強調被風景接住的感覺。",
+}
+
+POSTCARD_TEMPLATES = {
+    "極簡白框": "乾淨留白、像美術館明信片。",
+    "拍立得": "大照片與厚底白框，像一張旅行拍立得。",
+    "復古郵戳": "米色紙張、郵戳裝飾、帶一點手寫旅行感。",
+    "雜誌封面": "照片滿版、文字壓在照片上，像旅行雜誌封面。",
+}
+
 
 def get_mistral_client():
     api_key = os.getenv("MISTRAL_API_KEY")
@@ -178,7 +194,17 @@ def analyze_image_with_cv(image_bgr):
     }
 
 
-def build_prompt(location, travel_date, style, platforms, extra_context, filter_name, cv_summary):
+def build_prompt(
+    location,
+    travel_date,
+    style,
+    platforms,
+    extra_context,
+    filter_name,
+    mood,
+    postcard_template,
+    cv_summary,
+):
     platform_text = "、".join(platforms)
     location_text = location.strip() if location.strip() else "未提供，請根據照片推測即可"
     context_text = extra_context.strip() if extra_context.strip() else "無"
@@ -194,8 +220,11 @@ def build_prompt(location, travel_date, style, platforms, extra_context, filter_
 - 日期：{travel_date}
 - 文字風格：{style}
 - 風格要求：{STYLE_GUIDES[style]}
+- 旅行心情：{mood}
+- 心情要求：{MOODS[mood]}
 - 使用者想輸出的平台：{platform_text}
 - 選擇的照片濾鏡：{filter_name}
+- 明信片樣式模板：{postcard_template}
 - OpenCV 影像分析結果：{cv_text}
 - 補充背景：{context_text}
 
@@ -297,9 +326,16 @@ def wrap_text(text, max_chars):
     return lines
 
 
-def make_postcard(image, title, location, travel_date):
+def draw_stamp(draw, x, y, color, font):
+    draw.ellipse([x, y, x + 150, y + 150], outline=color, width=5)
+    draw.ellipse([x + 18, y + 18, x + 132, y + 132], outline=color, width=2)
+    draw.text((x + 34, y + 48), "TRAVEL", fill=color, font=font)
+    draw.line([x + 20, y + 103, x + 130, y + 103], fill=color, width=2)
+
+
+def make_postcard(image, title, location, travel_date, postcard_template):
     postcard_width = 1080
-    margin = 72
+    margin = 72 if postcard_template != "拍立得" else 58
     photo_width = postcard_width - margin * 2
 
     image = image.convert("RGB")
@@ -307,28 +343,76 @@ def make_postcard(image, title, location, travel_date):
     photo_height = int(image.height * ratio)
     resized_photo = image.resize((photo_width, photo_height), Image.LANCZOS)
 
-    title_font = get_font(46, bold=True)
+    title_font = get_font(46 if postcard_template != "雜誌封面" else 62, bold=True)
     meta_font = get_font(26)
     footer_font = get_font(22)
+    stamp_font = get_font(20, bold=True)
+
+    if postcard_template == "雜誌封面":
+        cover_height = 1350
+        cover = Image.new("RGB", (postcard_width, cover_height), "#111827")
+        cover_ratio = max(postcard_width / image.width, cover_height / image.height)
+        cover_size = (int(image.width * cover_ratio), int(image.height * cover_ratio))
+        cover_photo = image.resize(cover_size, Image.LANCZOS)
+        crop_x = (cover_size[0] - postcard_width) // 2
+        crop_y = (cover_size[1] - cover_height) // 2
+        cover_photo = cover_photo.crop((crop_x, crop_y, crop_x + postcard_width, crop_y + cover_height))
+        cover.paste(cover_photo, (0, 0))
+
+        overlay = Image.new("RGBA", cover.size, (0, 0, 0, 0))
+        overlay_draw = ImageDraw.Draw(overlay)
+        overlay_draw.rectangle([0, 0, postcard_width, 260], fill=(0, 0, 0, 84))
+        overlay_draw.rectangle([0, cover_height - 420, postcard_width, cover_height], fill=(0, 0, 0, 118))
+        cover = Image.alpha_composite(cover.convert("RGBA"), overlay).convert("RGB")
+        draw = ImageDraw.Draw(cover)
+
+        draw.text((72, 70), "TRAVEL LENS", fill="#ffffff", font=get_font(42, bold=True))
+        draw.text((72, 128), "AI PHOTO STORY", fill="#e5e7eb", font=footer_font)
+
+        title_lines = wrap_text(title, 13)
+        text_y = cover_height - 330
+        for line in title_lines[:4]:
+            draw.text((72, text_y), line, fill="#ffffff", font=title_font)
+            text_y += 76
+
+        meta = " / ".join(part for part in [location.strip(), str(travel_date)] if part)
+        if meta:
+            draw.text((72, cover_height - 86), meta, fill="#e5e7eb", font=meta_font)
+        return cover
 
     title_lines = wrap_text(title, 16)
-    text_height = 72 + len(title_lines) * 58 + 72
+    bottom_extra = 190 if postcard_template == "拍立得" else 72
+    text_height = bottom_extra + len(title_lines) * 58 + 72
     postcard_height = photo_height + margin * 2 + text_height
 
-    canvas = Image.new("RGB", (postcard_width, postcard_height), "#f8f5ef")
+    background = "#f8f5ef"
+    if postcard_template == "復古郵戳":
+        background = "#f3ead7"
+    canvas = Image.new("RGB", (postcard_width, postcard_height), background)
+
     draw = ImageDraw.Draw(canvas)
 
     canvas.paste(resized_photo, (margin, margin))
     border_color = "#ffffff"
+    border_width = 14 if postcard_template != "拍立得" else 24
     draw.rectangle(
-        [margin - 14, margin - 14, margin + photo_width + 14, margin + photo_height + 14],
+        [margin - border_width, margin - border_width, margin + photo_width + border_width, margin + photo_height + border_width],
         outline=border_color,
-        width=14,
+        width=border_width,
     )
 
-    text_y = margin + photo_height + 56
+    if postcard_template == "復古郵戳":
+        draw_stamp(draw, postcard_width - 245, margin + photo_height + 46, "#a16207", stamp_font)
+        draw.line(
+            [margin, margin + photo_height + 34, postcard_width - margin, margin + photo_height + 34],
+            fill="#d6b98c",
+            width=2,
+        )
+
+    text_y = margin + photo_height + (88 if postcard_template == "拍立得" else 56)
     for line in title_lines:
-        draw.text((margin, text_y), line, fill="#1f2933", font=title_font)
+        title_color = "#1f2933" if postcard_template != "復古郵戳" else "#573a1f"
+        draw.text((margin, text_y), line, fill=title_color, font=title_font)
         text_y += 58
 
     meta = " / ".join(part for part in [location.strip(), str(travel_date)] if part)
@@ -358,6 +442,10 @@ with st.sidebar:
     st.header("創作設定")
     filter_name = st.selectbox("照片濾鏡", list(FILTERS.keys()))
     st.caption(FILTERS[filter_name])
+    mood = st.selectbox("旅行心情", list(MOODS.keys()))
+    st.caption(MOODS[mood])
+    postcard_template = st.selectbox("明信片樣式", list(POSTCARD_TEMPLATES.keys()))
+    st.caption(POSTCARD_TEMPLATES[postcard_template])
     style = st.selectbox("文案風格", list(STYLE_GUIDES.keys()))
     location = st.text_input("地點", placeholder="例如：京都、台南、巴黎")
     travel_date = st.date_input("日期", value=date.today())
@@ -419,6 +507,8 @@ if uploaded_file:
                 platforms=platforms,
                 extra_context=extra_context,
                 filter_name=filter_name,
+                mood=mood,
+                postcard_template=postcard_template,
                 cv_summary=cv_summary,
             )
 
@@ -431,6 +521,7 @@ if uploaded_file:
             st.session_state["travel_result"] = result
             st.session_state["postcard_image"] = filtered_png
             st.session_state["postcard_title"] = extract_postcard_sentence(result)
+            st.session_state["postcard_template"] = postcard_template
 
 if st.session_state.get("travel_result"):
     st.divider()
@@ -448,6 +539,7 @@ if st.session_state.get("travel_result"):
         title=postcard_title,
         location=location,
         travel_date=travel_date,
+        postcard_template=postcard_template,
     )
     postcard_png = pil_to_png_bytes(postcard)
 
