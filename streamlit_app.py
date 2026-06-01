@@ -55,8 +55,8 @@ def get_mistral_client():
     api_key = os.getenv("MISTRAL_API_KEY")
     if not api_key:
         try:
-            api_key = st.secrets.get("MISTRAL_API_KEY")
-        except (FileNotFoundError, KeyError):
+            api_key = st.secrets["MISTRAL_API_KEY"]
+        except Exception:
             api_key = None
 
     if not api_key:
@@ -478,9 +478,9 @@ if uploaded_file:
         st.subheader("照片預覽")
         tab_original, tab_filtered = st.tabs(["原圖", "濾鏡後"])
         with tab_original:
-            st.image(uploaded_file, caption=uploaded_file.name, width="stretch")
+            st.image(uploaded_file, caption=uploaded_file.name, use_container_width=True)
         with tab_filtered:
-            st.image(filtered_image, caption=f"{filter_name} 濾鏡", width="stretch")
+            st.image(filtered_image, caption=f"{filter_name} 濾鏡", use_container_width=True)
             st.download_button(
                 "下載濾鏡照片",
                 data=filtered_png,
@@ -545,7 +545,7 @@ if st.session_state.get("travel_result"):
 
     preview_col, download_col = st.columns([1, 1])
     with preview_col:
-        st.image(postcard, caption="AI 旅行明信片", width="stretch")
+        st.image(postcard, caption="AI 旅行明信片", use_container_width=True)
     with download_col:
         st.write("你可以下載濾鏡後的旅行明信片，放進簡報、作品集或個人網站。")
         st.download_button(
