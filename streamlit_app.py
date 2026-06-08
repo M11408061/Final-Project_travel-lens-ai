@@ -10,7 +10,7 @@ import numpy as np
 import streamlit as st
 from dotenv import load_dotenv
 from openai import OpenAI
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 
 load_dotenv(override=True)
@@ -69,12 +69,23 @@ def get_mistral_client():
     )
 
 
-def uploaded_file_to_bgr(uploaded_file):
-    image_array = np.frombuffer(uploaded_file.getvalue(), np.uint8)
-    image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-    if image is None:
+def uploaded_file_to_pil(uploaded_file):
+    try:
+        image = Image.open(io.BytesIO(uploaded_file.getvalue()))
+        image = ImageOps.exif_transpose(image)
+        return image.convert("RGB")
+    except OSError:
         st.error("無法讀取這張圖片，請改用 JPG、PNG 或 WEBP。")
         st.stop()
+
+
+def pil_to_bgr(image):
+    image_rgb = np.array(image.convert("RGB"))
+    return cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
+
+
+def uploaded_file_to_bgr(uploaded_file):
+    return pil_to_bgr(uploaded_file_to_pil(uploaded_file))
     return image
 
 
@@ -466,10 +477,12 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file:
-    original_bgr = uploaded_file_to_bgr(uploaded_file)
+    original_image = uploaded_file_to_pil(uploaded_file)
+    original_bgr = pil_to_bgr(original_image)
     filtered_bgr = apply_filter(original_bgr, filter_name)
     filtered_image = bgr_to_pil(filtered_bgr)
     filtered_png = pil_to_png_bytes(filtered_image)
+    original_png = pil_to_png_bytes(original_image)
     cv_summary = analyze_image_with_cv(filtered_bgr)
 
     left_col, right_col = st.columns([1.05, 0.95])
@@ -478,7 +491,7 @@ if uploaded_file:
         st.subheader("照片預覽")
         tab_original, tab_filtered = st.tabs(["原圖", "濾鏡後"])
         with tab_original:
-            st.image(uploaded_file, caption=uploaded_file.name, use_container_width=True)
+            st.image(original_image, caption=uploaded_file.name, use_container_width=True)
         with tab_filtered:
             st.image(filtered_image, caption=f"{filter_name} 濾鏡", use_container_width=True)
             st.download_button(
@@ -512,7 +525,7 @@ if uploaded_file:
                 cv_summary=cv_summary,
             )
 
-            image_data_url = bytes_to_data_url(uploaded_file.getvalue(), uploaded_file.type or "image/jpeg")
+            image_data_url = bytes_to_data_url(original_png, "image/png")
             client = get_mistral_client()
 
             with st.spinner("AI 正在閱讀照片並撰寫旅行故事..."):
