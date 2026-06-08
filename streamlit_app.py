@@ -16,6 +16,8 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 load_dotenv(override=True)
 
 MISTRAL_MODEL = "pixtral-12b-latest"
+AI_MAX_SIDE = 1400
+PROCESSING_MAX_SIDE = 2200
 
 STYLE_GUIDES = {
     "文青感": "文字有畫面感、溫柔、細膩，但不要過度浮誇。",
@@ -86,7 +88,17 @@ def pil_to_bgr(image):
 
 def uploaded_file_to_bgr(uploaded_file):
     return pil_to_bgr(uploaded_file_to_pil(uploaded_file))
-    return image
+
+
+def resize_to_max_side(image, max_side):
+    width, height = image.size
+    longest_side = max(width, height)
+    if longest_side <= max_side:
+        return image.copy()
+
+    scale = max_side / longest_side
+    new_size = (int(width * scale), int(height * scale))
+    return image.resize(new_size, Image.LANCZOS)
 
 
 def bgr_to_pil(image_bgr):
@@ -97,6 +109,12 @@ def bgr_to_pil(image_bgr):
 def pil_to_png_bytes(image):
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def pil_to_jpeg_bytes(image, quality=88):
+    buffer = io.BytesIO()
+    image.convert("RGB").save(buffer, format="JPEG", quality=quality, optimize=True)
     return buffer.getvalue()
 
 
@@ -477,12 +495,14 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file:
-    original_image = uploaded_file_to_pil(uploaded_file)
+    original_image_full = uploaded_file_to_pil(uploaded_file)
+    original_image = resize_to_max_side(original_image_full, PROCESSING_MAX_SIDE)
+    ai_image = resize_to_max_side(original_image_full, AI_MAX_SIDE)
     original_bgr = pil_to_bgr(original_image)
     filtered_bgr = apply_filter(original_bgr, filter_name)
     filtered_image = bgr_to_pil(filtered_bgr)
     filtered_png = pil_to_png_bytes(filtered_image)
-    original_png = pil_to_png_bytes(original_image)
+    ai_jpeg = pil_to_jpeg_bytes(ai_image)
     cv_summary = analyze_image_with_cv(filtered_bgr)
 
     left_col, right_col = st.columns([1.05, 0.95])
@@ -525,16 +545,20 @@ if uploaded_file:
                 cv_summary=cv_summary,
             )
 
-            image_data_url = bytes_to_data_url(original_png, "image/png")
-            client = get_mistral_client()
+            image_data_url = bytes_to_data_url(ai_jpeg, "image/jpeg")
 
-            with st.spinner("AI 正在閱讀照片並撰寫旅行故事..."):
-                result = generate_travel_content(client, prompt, image_data_url)
+            try:
+                client = get_mistral_client()
+                with st.spinner("AI 正在閱讀照片並撰寫旅行故事..."):
+                    result = generate_travel_content(client, prompt, image_data_url)
 
-            st.session_state["travel_result"] = result
-            st.session_state["postcard_image"] = filtered_png
-            st.session_state["postcard_title"] = extract_postcard_sentence(result)
-            st.session_state["postcard_template"] = postcard_template
+                st.session_state["travel_result"] = result
+                st.session_state["postcard_image"] = filtered_png
+                st.session_state["postcard_title"] = extract_postcard_sentence(result)
+                st.session_state["postcard_template"] = postcard_template
+            except Exception as error:
+                st.error("生成時發生錯誤，請稍後再試，或換一張較小的照片。")
+                st.caption(f"錯誤訊息：{str(error)[:300]}")
 
 if st.session_state.get("travel_result"):
     st.divider()
